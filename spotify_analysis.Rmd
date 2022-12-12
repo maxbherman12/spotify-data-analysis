@@ -1,0 +1,538 @@
+---
+title: "Data Analysis Project"
+author: "Max Herman"
+date: "12/14/2022"
+output: 
+  html_document: 
+    toc: yes
+    number_sections: yes
+---
+
+# Data Analysis Project
+## Introduction
+Since its genesis in 2006, Spotify has grown to be the largest music streaming platform in the world. Spotify services over 433 million users across 184 countries. As such, many trust Spotify to curate their playlists, suggest weekly tunes, and rank the world's top songs. In order to provide these services, Spotify leverages machine learning on its vast amount of data. In addition to basic information and metadata, Spotify calculates several data points for each song including simple features like tempo and others as abstract as danceability. In this paper, we will be exploring what features make up songs in Spotify's weekly top 200 list.
+
+## Research Question
+How well can the features of a song such as energy, streams, and acousticness predict the weekly popularity ranking of songs on Spotify?
+
+## Significance of this study
+In this study, we will be exploring popularity ranking as our outcome variable. The results of this study may be valuable because it will potentially provide insight into what makes a song popular. The ability to identify the features behind the most popular songs on Spotify has immense fiscal value. Top ranked songs on Spotify average around 3 million streams netting those artists north of \$12,000 (Spotify pays \$0.004 per stream on average). Hopefully, the results of this study can inform artists working to monetize their art on ways to make more popular music and hence make more money.
+
+## Data
+This data set consists of the top 200 songs on Spotify every week from 02/04/2021 ~ 07/14/2022. The data set has these rankings not only for the United States but for every country in which Spotify is offered as well as the global aggregate. There are several features reported in this data set but the ones of importance are explained on below:
+
+* album_num_tracks - number of tracks in the album that the track is from
+* weeks_on_chart - number of weeks the song was on Spotify Charts (in a given country)
+* streams - number of streams
+* danceability - describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is most danceable.
+* energy - a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity
+* key - the key of the song
+* loudness - The overall loudness of a track in decibels (dB)
+* speechiness - detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value.
+* acousticness - A confidence measure from 0.0 to 1.0 of whether the track is acoustic
+* instramentalness - Predicts whether a track contains no vocals. "Ooh" and "aah" sounds are treated as instrumental in this context
+* liveness - Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live
+* valence - A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry).
+* tempo - tempo of the song in BPM (beats per minute)
+* duration - length of the song in milliseconds
+* release_date - day the song was released on Spotify
+
+For more in depth descriptions of these features, refer to the Spotify documentation.
+[https://developer.spotify.com/documentation/web-api/reference/#/operations/get-several-audio-features](https://developer.spotify.com/documentation/web-api/reference/#/operations/get-several-audio-features)
+
+To download this data set, visit the following Kaggle page:
+[https://www.kaggle.com/datasets/yelexa/spotify200](https://www.kaggle.com/datasets/yelexa/spotify200)
+
+Please note that the data set I submitted is not the same as the data set above. This is because the original data set is 800MB large. Instead, I have submitted the data set after I reduced its scope.
+
+### Data Wrangling
+In order to complete my analysis, the following steps were taken to organize the data
+
+1. Called in data
+2. Narrowed scope of data
+3. Removed duplicate songs
+4. Calculated days since release
+5. Removed null observations
+
+### Calling in the data
+```{r}
+library(tidyverse)
+spotify <- read_csv("final.csv")
+dim(spotify)
+str(spotify)
+```
+
+Clearly, this data set is massive so we are going to reduce its scope. To do so, we will limit our search to only the charts in the United States and within a specific date range. We will select the weeks of 5/6/21 and 5/5/22 for this study. Note that this selection is arbitrary other than the selection of the same week in consecutive years. This choice was to ensure that there was no variability caused by the time of the year.
+
+### Narrowing scope of data
+```{r}
+week_choice_1 <- as.Date("2021-05-06")
+week_choice_2 <- as.Date("2022-05-05")
+
+spotify_small <- spotify %>% 
+  filter(country == "United States") %>% 
+  filter(week == week_choice_1 | week == week_choice_2)
+
+dim(spotify_small)
+```
+
+We have now reduced our dataset from 1,787,999 observations down to 592! Now, let's clean up this tibble.
+
+### Cleaning the tibble
+```{r}
+# some songs have multiple observations to represent each involved artist
+# we include week to prevent songs that are on the top charts in both years from being excluded
+spotify_distinct_songs <- spotify_small %>% 
+  distinct(track_name, week, .keep_all = T)
+
+# define a variable that tracks days since release
+spotify_distinct_songs$release_date <- as.Date(spotify_distinct_songs$release_date)
+
+spotify_mutated <- spotify_distinct_songs %>% 
+  mutate(days_since_release = difftime(week, release_date, units = "days"))
+
+spotify_mutated$days_since_release <- as.numeric(spotify_mutated$days_since_release)
+
+# Remove rows where days since release is NA (this happens when release_day is NA)
+spotify_mutated <- spotify_mutated %>% 
+  filter(!is.na(days_since_release))
+```
+
+Finally, we will select the columns we will use in our analysis.
+```{r}
+spotify_final_outcome <- spotify_mutated %>% 
+  select(album_num_tracks, weeks_on_chart, streams, danceability, energy, key, loudness,
+         speechiness, acousticness, instrumentalness, liveness, valence, tempo, duration, days_since_release, rank)
+
+# Write out final df to file for submission (original df is too large)
+write.csv(spotify_final_outcome, "spotify_final.csv")
+```
+
+## Visualize predictors by the rank
+Now that we have wrangled and cleaned our data into one tibble, let's visualize how our predictors relate to our outcome variable, rank, using a matrix of scatter plots.
+```{r}
+library(PerformanceAnalytics)
+chart.Correlation(spotify_final_outcome, histogram = TRUE, method = "pearson")
+```
+
+
+## Principle Component Analysis
+In the following section, we will conduct a principal component analysis (PCA) on our data. The purpose of a PCA is to reduce the complexity of high dimensional data while maintaining the underlying patterns that exist within it. With 15 different features, a PCA of our Spotify data will help us identify the overall trends that exist in our data set.
+
+For our PCA analysis, we will not need our outcome variable so let's remove it.
+```{r}
+spotify_final <- spotify_final_outcome %>% 
+  select(-rank)
+```
+
+### Check for multicollinearity
+```{r}
+spotify_corr <- cor(spotify_final)
+
+# Write correlations out to a file for easier inspection
+write.csv(spotify_corr, "spotify_corr.csv")
+```
+
+Let's visualize these correlations as well.
+```{r}
+library(corrplot)
+corrplot(spotify_corr, 
+         type="lower", #put color strength on bottom
+         tl.pos = "ld", #Character or logical, position of text labels, 'ld'(default if type=='lower') means left and diagonal,
+         tl.cex = 1, #Numeric, for the size of text label (variable names).
+         method="color", 
+         addCoef.col="black", 
+         diag=FALSE,
+         tl.col="black",
+         tl.srt=45,
+         is.corr = FALSE,
+         number.cex = 0.5,
+         number.digits = 3)
+```
+
+
+None of the variables have r > 0.899 so we can assume there are no problems with multicollinearity.
+
+### Scale the variables
+It is important that we scale our variables before performing any principle component analysis. This is because as it stands, some of our variables are on completely different scales. Some have units of days where others have arbitrary units defined by Spotify. Thus, we must scale our numeric predictors such that each has a mean of 0 and a standard deviation of 1.
+
+```{r}
+library(psych)
+spotify_sc <- spotify_final %>% 
+  mutate_all(~(scale(.) %>% as.vector))
+```
+
+Let's check that was successful by ensuring the mean and standard deviation of each feature is 0 and 1 respectively.
+```{r}
+psych::describe(spotify_sc)
+```
+
+### Conudct initial PCA examination
+Let's evaluate the proportion of the variance described by each of the possible components.
+```{r}
+library(factoextra)
+viz_pca <- prcomp(spotify_sc, center = TRUE,scale. = TRUE)
+
+summary(viz_pca)
+```
+
+```{r}
+viz_pca$rotation #show the loadings for each component by variable
+```
+
+### Visualize the PCA
+Now that we have built our initial PCA, let's visualize it through a graph of the variables.
+
+```{r}
+fviz_pca_var(viz_pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE #Avoid overlapping text if possible 
+             )
+```
+
+From this graph, we can see the beginnings of our PCA based on the direction that the vectors for each variable are pointing. Let's now do some validation and pruning of our PCA.
+
+### Bartlett's Test
+```{r}
+cortest.bartlett(spotify_sc, 395)
+```
+
+After conducting Bartlett's test, we calculated a p-value of 6.4e-135 which is much smaller than the standard alpha of 0.05. This allows us to reject the null hypothesis that our matrix is not an identity matrix. This means that there exist some relationships between the variables in our data set. Thus, we can continue with the principal component analysis.
+
+### KMO
+We will now run a KMO on our data. We will be looking for variables with an index value lower than 0.5 and removing those variables.
+```{r}
+KMO(spotify_sc)
+```
+
+Tempo has the lowest KMO index value so we will remove that first. Then, we will rerun the KMO and repeat this process until all variables have an index value above 0.5.
+
+```{r}
+spotify_filt <- spotify_sc %>% 
+  select(-tempo)
+```
+
+```{r}
+KMO(spotify_filt)
+```
+
+Remove instrumentalness.
+```{r}
+spotify_filt2 <- spotify_filt %>% 
+  select(-instrumentalness)
+```
+
+```{r}
+KMO(spotify_filt2)
+```
+
+Remove danceability.
+```{r}
+spotify_filt3 <- spotify_filt2 %>% 
+  select(-danceability)
+```
+
+```{r}
+KMO(spotify_filt3)
+```
+
+Remove key.
+```{r}
+spotify_filt4 <- spotify_filt3 %>% 
+  select(-key)
+```
+
+```{r}
+KMO(spotify_filt4)
+```
+
+Now all of our variables have a KMO index value above 0.5 so we can proceed. Let's now run our baseline PCA.
+
+### Baseline PCA
+```{r}
+pca_base <- principal(spotify_filt4, nfactors = 11, rotate = "none")
+pca_base
+```
+
+The first four components are the only ones with SS loadings greater than 1. As such, we will only consider the first four components for our final analysis. Let's graph a scree plot to check this intuition.
+
+```{r}
+plot(pca_base$values, type = "b")
+```
+
+In the scree plot, the inflection point appears to be around 3-4. Since the first four components all have SS loadings greater than one, we will use four components in our final analysis.
+
+### Check that residuals are normally distributed
+```{r}
+# Perform PCA to get residuals
+pca_resid <- principal(spotify_filt4, nfactors = 4, rotate = "none")
+pca_resid
+```
+
+```{r}
+# Create a correlation matrix that will be used to calculate residuals below
+corMatrix<-cor(spotify_filt4)
+corMatrix
+```
+
+```{r}
+# Create an object from the correlation matrix and the PCA loading that contains the factor residuals
+residuals<-factor.residuals(corMatrix, pca_resid$loadings)
+```
+
+Let's visualize these residuals to confirm that they are normally distributed.
+```{r}
+hist(residuals)
+```
+
+The residuals look mostly normally distributed so we may continue.
+
+### Informed PCA
+We will now perform our final PCA.
+
+```{r}
+pca_final <- principal(spotify_filt4, nfactors = 4, rotate = "promax")
+
+# Print these with formatting to increase legibility
+print.psych(pca_final, cut = 0.3, sort = TRUE)
+```
+
+Let's visualize this analysis through a PCA plot and a factor loading graph.
+
+```{r}
+plot(pca_final)
+fa.diagram(pca_final)
+```
+
+### Collect factor scores
+Finally, lets gather these factor loadings into a data frame that we can use in further analysis.
+
+```{r}
+# Create tibble from PCA scores and rename columns
+pca_final_scores <- as_tibble(pca_final$scores) %>% 
+  rename(Vibe = RC1, ListenTime = RC2, RecentPopularity = RC3, AudienceInteraction = RC4)
+
+# Pull out the outcome variable from our original data
+outcome <- spotify_final_outcome %>% 
+  select(rank)
+
+# bind outcome variable to PCA
+pca_scores_outcome <- bind_cols(pca_final_scores, outcome)
+```
+
+```{r}
+pca_scores_outcome
+
+# Write these scores out to a file for easier inspection
+write.csv(pca_scores_outcome,"pca_scores.csv", row.names=FALSE)
+```
+
+### PCA Discussion
+This component analysis is very interesting in the way that components were grouped. Component one makes logical sense in the grouping of variables. All but acousticness are positively correlated which allows us to group these features into whether the song is upbeat/happy. We will classify this as the song's vibe.
+
+The second component is less clear in the way the variables are grouped. One would think that days since release would have no relation to duration or the number of tracks on the album. Still, these variables can be generally grouped into the category of music length because it combines how long the songs are with how many songs are on the album as well as the time since release.
+
+The third and fourth components are much more clear in their relation to each other. Weeks on chart and streams make sense to be related as a song on the top charts for more weeks would likely have more streams. We can group these features into Recent Popularity. The last component combines speechiness and liveness. It is likely that live recordings of songs would have more moments where the artist speaks to the audience. As such, these features can be combined into Audience Interaction.
+
+These components do a decent job explaining the variance in our data. The components explain 21, 17, 11, and 10 percent of the variance respectively. Collectively, all four components explain 58% of the variance present in our data.
+
+Using this component analysis, we can now perform a regression analysis on this data using the selected components.
+
+## Linear Regression
+
+We will now conduct a linear regression on the data using the composite features we created in the principal component analysis above. Before moving forward, let's recap the underlying features baked into these new variables.
+
+* Vibe - energy, loudness, acousticness, valence
+* ListenTime - days_since_release, duration, album_num_tracks
+* RecentPopularity - weeks_on_chart, streams
+* AudienceInteraction - speechiness, liveness
+
+### Get descriptives (mean/SD) for numeric predictor variables 
+Let's ensure that the principal components created above are scaled correctly.
+
+```{r}
+psych::describe(pca_scores_outcome)
+```
+
+Great! All of the variables have a mean of 0 and standard deviation of 1.
+
+### Correlation among variables for multi-collinearity
+Let's find the correlation between all numeric features in our data. 
+```{r}
+cor(pca_scores_outcome)
+```
+
+None of the variables clearly exhibit multi-collinearity between them so we will not remove any of them for now.
+
+### Split into train and test sets
+```{r}
+library(caret)
+set.seed(1234)
+
+data_final <- pca_scores_outcome %>% 
+  mutate(id = row_number()) # create an id field so that it is easy to anti join for the test set
+
+train <- data_final %>% 
+  sample_frac(0.8)
+
+# Create testing set by removing all rows from train set from the original data and remove ID column
+test <- anti_join(data_final, train, by="id") %>% 
+  select(-id)
+
+# Remove the ID column
+train <- train %>% 
+  select(-id)
+```
+
+### Build linear model
+We will now calculate a linear regression on our training data.
+```{r}
+spotify_lm <- lm(rank~., train)
+summary(spotify_lm)
+```
+
+The most significant variables appear to be ListenTime and RecentPopularity. Keeping that in mind, let's remove variables with high VIF scores.
+
+### Checking for VIF
+We will now check that the VIF scores for each variable are below 5.
+
+```{r}
+library(car)
+car::vif(spotify_lm)
+```
+
+Since the VIF score for each variable is below 5, we will leave them all in our regression. If we had any VIF scores greater than 5, we would have removed them one by one from our model starting with the highest VIF score (provided that wasn't our most significant variable).
+
+Now that we have accounted for VIF, let's check for supression effects.
+
+### Check for supression effects
+```{r}
+cor(pca_scores_outcome)
+summary(spotify_lm)
+```
+
+The direction of the correlation between each of the features and the outcome variable is the same in our regression so supression effects are not present. Finally, let's remove any insignificant variables from our model.
+
+### Removing insignificant variables
+```{r}
+summary(spotify_lm)
+
+# Remove AudienceInteraction because it the most insignificant
+spotify_lm2 <- lm(rank~., train[, c(1:3,5)])
+summary(spotify_lm2)
+
+# Remove Vibe because it is still insignificant
+spotify_lm3 <- lm(rank~., train[, c(2:3,5)])
+summary(spotify_lm3)
+```
+
+AudienceInteraction was the most insignificant variable so it was removed first. After rerunning the regression, Vibe was still insignificant so it was removed as well. This leaves us ith a regression using two variables.
+
+### Recheck VIF and supression effects for new model
+```{r}
+car::vif(spotify_lm3)
+summary(spotify_lm3)
+```
+
+All variables still have VIF values below 5 and there are no problems with supression effect so we may proceed with our analysis.
+
+### Interpretting the model
+Recall that in our case, increasing rank is a negative outcome if an artist wants their song to be at the top of the charts. Since our variable are scaled, we cannot derive the exact meaning of these coefficients. However, we can ascertain that RecentPopularity has a far stronger effect on rank than ListenTime.
+
+```{r}
+# Update the training and test sets for future use
+train2 <- train %>% 
+  select(-Vibe, -AudienceInteraction)
+
+test2 <- test %>% 
+  select(-Vibe, -AudienceInteraction)
+```
+
+### Homoscedasticity check
+Now all of our variables are significant. We will now check for homoscedasticity through a series of tests.
+
+```{r}
+# Shapiro test
+shapiro.test(residuals(spotify_lm3))
+```
+
+Since we have a p-value of 2.35e-05 which is far smaller than alpha, we reject the null hypothesis meaning that the residuals likely do not follow a normal distribution.
+
+```{r}
+# Q-Q plot
+plot(spotify_lm3, which=2)
+```
+
+Since the points almost all fall along a straight line, we can assume the data is normally distributed.
+
+```{r}
+# Residuals vs fitted plot
+plot(spotify_lm3, which=1)
+```
+
+In this plot, the points appear to be located randomly about the 0 line in no distinct pattern. Thus, we can reasonably assume that the relationship between the data is linear.
+
+### Visualizing model fit
+Let's visualize how well our model did by comparing our fitted values to the actual values on a scatter plot.
+
+```{r}
+actual <- train2$rank
+fitted <- unname(spotify_lm3$fitted.values)
+act_fit <- cbind.data.frame(actual, fitted)
+
+ggplot(act_fit, aes(x = actual, y = fitted)) +
+  geom_point() +
+  xlab("Actual value") +
+  ylab("Predicted value") +
+  ggtitle("Scatterplot for actual and fitted values") +
+  geom_abline(intercept = 1,
+              slope = 1,
+              color = "red",
+              size = 2)
+```
+
+Let's quantify that error using the root mean squared error (RMSE). Since this metric is somewhat meaningless on its own, let's also find the RMSE of a sample where the rankings are completely randomly assigned and compare it to the RMSE of our fitted values.
+
+```{r}
+# Calculate RMSE
+sqrt(mean((actual - fitted) ^ 2))
+
+# Compare to completely random distribution
+random_guess <- sample(1:200, length(actual), replace=TRUE)
+sqrt(mean((actual - random_guess) ^ 2))
+```
+
+The RMSE of the random distribution is almost twice as large as the fitted from our model. That suggests that our model has a tangible ability to predict the rank of a song on Spotify. Let's now fit this model to our test data set to check our findings.
+
+```{r}
+test_actual <- test2$rank
+test_fit <- unname(predict(spotify_lm3, newdata = test2))
+sqrt(mean((test_actual - test_fit) ^ 2))
+```
+
+As expected, the RMSE for our fitted data from our test set is slightly larger than that of the training set. This is because our model is built to fit the training data. However, the RMSE for this test data is still considerably lower than the random guesser which is promising.
+
+Let's also compare the R2 values of our training and testing data.
+```{r}
+# train R2
+cor(actual, fitted) ^ 2
+
+# test R2
+cor(test_actual, test_fit) ^ 2
+```
+
+Interestingly, the model fits our test data slightly better than our training data. Our model explains 32.35% of the variance in our testing data.
+
+
+## Discussion
+I found the outcome of this regression to be surprising. Before building the model, I would have expected the "vibe" of a song to have a significant impact on a songs ranking due to the trends in modern popular music. However, the effect of this was likely dampened because all of the songs in our data set were in the top 200 list.
+
+Furthermore, I was surprised how well our regression predicted the rank of songs. Music is an incredibly subjective and creative art that one would expect could not be quantified and predicted purely by numbers. However, our model does a relatively impressive job fitting our data. The model boasts a somewhat low RMSE and explains 32.4% of the variance in the data. Moreover, the tests for homoscedasticity lead us to confirm that a linear model is valid for modeling the relationships between the features of a song and its rank.
+
+## Limitations
+Though the findings of this study were interesting, it is important to acknowledge the limitations that faced this analysis. First, we had a rather small data set to work with. In order to control for differences in time of year and song preference, the same week of the year was used for all of the data. However, since the data set only contained two years worth of data, we only had two observations of each rank type. In future studies, it would be likely informative if one could acquire more data to work with. Second, this study compares popular songs against other popular songs. In other words, only songs that were in the top 200 were a part of this data set. This is potentially an issue because it is likely that these songs had a lot in common because we know they were all popular. This is likely why many of the variables we used in our regression were found to be insignificant.
+
+## Future Studies
+In the future, it would be interesting to take this study further and down other avenues. For example, if we acquired a larger data set with non top charts songs, one could evaluate what elements make up more popular songs versus songs that aren't popular at all. It would also be interesting to pair this analysis with a sentiment analysis of tweets related to the artist to see if how the public perceives an artist affects a song's ranking.
+
